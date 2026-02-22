@@ -1,0 +1,45 @@
+{
+  "name": "create-web-stream",
+  "version": "1.0.0",
+  "author": "OkaYu",
+  "license": "(MIT OR Apache-2.0)",
+  "description": "Create Web Readable/Writable streams from simple handlers.",
+  "keywords": [
+    "web-streams",
+    "stream",
+    "readable-stream",
+    "writable-stream"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE-APACHE.txt",
+    "LICENSE-MIT.txt"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "pretest": "pnpm build",
+    "prepublishOnly": "pnpm run build"
+  },
+  "devDependencies": {
+    "rollup": "^4.0.0",
+    "@rollup/plugin-typescript": "^12.0.0",
+    "tslib": "^2.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "sideEffects": false
+}
