@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "author": "OkaYu",
   "license": "(MIT OR Apache-2.0)",
-  "description": "Create Web Readable/Writable streams from simple handlers.",
+  "description": "Create Web Readable/Writable streams from simple handlers and options.",
   "keywords": [
     "web-streams",
     "stream",
