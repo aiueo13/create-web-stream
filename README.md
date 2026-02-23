@@ -1,3 +1,5 @@
+Note: **I’m using a translation tool, so there may be some inappropriate expressions.**
+
 # create-web-stream
 
 A library for creating Web API `ReadableStream` and `WritableStream` instances from simple handlers and options. Supports BYOB readers, buffered writers, `AbortSignal` integration, and guaranteed cleanup callbacks.
