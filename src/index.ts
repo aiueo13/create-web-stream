@@ -10,6 +10,8 @@ export type CreateReadableStreamHandler = {
 	 * - **Yielding data**: Return a `Uint8Array` containing the next chunk of bytes.
 	 * - **Ending the stream**: Return `null`, `undefined`, or an empty `Uint8Array` (`byteLength === 0`) to signal that no more data is available. This will automatically close the stream.
 	 * - **Handling errors**: If an error is thrown inside this function, the stream will enter an error state and terminate.
+	 * 
+	 * @returns {PromiseLike<CreateReadableStreamHandlerSource> | CreateReadableStreamHandlerSource} The next chunk of bytes.
 	 */
 	read: () => PromiseLike<CreateReadableStreamHandlerSource> | CreateReadableStreamHandlerSource,
 
@@ -22,6 +24,9 @@ export type CreateReadableStreamHandler = {
 	 * - The stream or its reader is explicitly canceled. (type: `"Cancel"`)
 	 * - The provided `AbortSignal` fires an `abort` event. (type: `"SignalAbort"`)
 	 * - An error occurs during a read operation. (type: `"Error"`)
+	 * 
+	 * @param {CreateReadableStreamHandlerReleaseType} type The type of the release operation.
+	 * @param {unknown} reason The reason for the release operation.
 	 */
 	release?: (type: CreateReadableStreamHandlerReleaseType, reason?: unknown) => PromiseLike<void> | void,
 }
@@ -33,20 +38,27 @@ export type CreateReadableStreamOptions = {
 	 * 
 	 * When the abort event is fired, the handler's `release` function will be called.
 	 */
-	signal?: AbortSignal
+	signal?: AbortSignal,
+
+	/**
+	 * @internal
+	 * @ignore
+	 */
+	__internal_useByteStream__?: boolean
 }
 
 /**
  * Creates a `ReadableStream` that yields byte data using the provided custom handler.
  * 
- * This function does not throw errors. 
  * If you need to throw an error early when the provided `options.signal` is already aborted,
  * the caller must check and handle it manually.
- * The resulting stream includes a BYOB (Bring Your Own Buffer) reader if supported by the runtime.
  * 
- * @param handler The stream handler: `read`, `release`. See `CreateReadableStreamHandler` for details.
- * @param options Optional settings: `signal`. See `CreateReadableStreamOptions` for details.
- * @returns A `ReadableStream<Uint8Array<ArrayBuffer>>` configured with the provided handler and options.
+ * The resulting stream can provide a BYOB reader if supported by the runtime.
+ * If unsupported, only a default reader is available.
+ * 
+ * @param {CreateReadableStreamHandler} handler The stream handler: `read`, `release`. See `CreateReadableStreamHandler` for details.
+ * @param {CreateReadableStreamOptions} options Optional settings: `signal`. See `CreateReadableStreamOptions` for details.
+ * @returns {ReadableStream<Uint8Array<ArrayBuffer>>} A `ReadableStream<Uint8Array<ArrayBuffer>>` configured with the provided handler and options.
  */
 export function createReadableStream(
 	handler: CreateReadableStreamHandler,
@@ -77,7 +89,11 @@ export function createReadableStream(
 		return cleanupPromise
 	}
 
-	if (!isReadableByteStreamAvailable()) {
+	const useByteStream = (options?.__internal_useByteStream__ !== undefined)
+		? options.__internal_useByteStream__
+		: isReadableByteStreamAvailable()
+
+	if (!useByteStream) {
 		return new ReadableStream({
 
 			start(controller) {
@@ -191,6 +207,226 @@ export function createReadableStream(
 }
 
 
+export type CreateBYOBReadableStreamHandlerReleaseType = "Close" | "Cancel" | "SignalAbort" | "Error"
+
+export type CreateBYOBReadableStreamHandler = {
+
+	/**
+	 * A callback invoked when the stream's consumer requests more data.
+	 *
+	 * - **Yielding data**: Write bytes into the provided `buffer` and return the number of bytes written (1 or greater). The returned value must not exceed `buffer.byteLength`.
+	 * - **Ending the stream**: Return `0` to signal that no more data is available. This will automatically close the stream.
+	 * - **Handling errors**: If an error is thrown inside this function, the stream will enter an error state and terminate.
+	 * 
+	 * @param {Uint8Array<ArrayBuffer>} buffer The buffer to write the data into.
+	 * @returns {PromiseLike<number> | number} The number of bytes written.
+	 */
+	read: (buffer: Uint8Array<ArrayBuffer>) => PromiseLike<number> | number
+
+	/**
+	 * An optional callback for performing cleanup operations.
+	 * 
+	 * This function is guaranteed to be invoked at most once. 
+	 * It is automatically triggered when the stream terminates under any of the following conditions:
+	 * - The stream's reader is successfully read to the end. (type: `"Close"`)
+	 * - The stream or its reader is explicitly canceled. (type: `"Cancel"`)
+	 * - The provided `AbortSignal` fires an `abort` event. (type: `"SignalAbort"`)
+	 * - An error occurs during a read operation. (type: `"Error"`)
+	 * 
+	 * @param {CreateBYOBReadableStreamHandlerReleaseType} type The type of the release operation.
+	 * @param {unknown} reason The reason for the release operation.
+	 */
+	release?: (type: CreateBYOBReadableStreamHandlerReleaseType, reason?: unknown) => PromiseLike<void> | void,
+}
+
+export type CreateBYOBReadableStreamOptions = {
+
+	/**
+	 * An `AbortSignal` to abort the stream.
+	 * 
+	 * When the abort event is fired, the handler's `release` function will be called.
+	 */
+	signal?: AbortSignal,
+
+	/**
+	 * @internal
+	 * @ignore
+	 */
+	__internal_useByteStream__?: boolean
+}
+
+/**
+ * Creates a `ReadableStream` that yields byte data using a BYOB-style handler.
+ *
+ * If you need to throw an error early when the provided `options.signal` is already aborted,
+ * the caller must check and handle it manually.
+ * 
+ * The resulting stream can provide a BYOB reader if supported by the runtime.
+ * If unsupported, only a default reader is available.
+ *
+ * @param {CreateBYOBReadableStreamHandler} handler The stream handler: `read`, `release`. See `CreateBYOBReadableStreamHandler` for details.
+ * @param {number} defaultBufferSize The default size of the buffer passed to `handler.read`. Must be a positive safe integer. Used as `autoAllocateChunkSize` when a bytes-type reader is available. If unsupported, used as the size of the internal buffer for a default reader.
+ * @param {CreateBYOBReadableStreamOptions} options Optional settings: `signal`. See `CreateBYOBReadableStreamOptions` for details.
+ * @returns {ReadableStream<Uint8Array<ArrayBuffer>>} A `ReadableStream<Uint8Array<ArrayBuffer>>` configured with the provided handler and options.
+ */
+export function createBYOBReadableStream(
+	handler: CreateBYOBReadableStreamHandler,
+	defaultBufferSize: number,
+	options?: CreateBYOBReadableStreamOptions,
+): ReadableStream<Uint8Array<ArrayBuffer>> {
+
+	defaultBufferSize = Math.ceil(defaultBufferSize)
+	requiresNonzeroSafeInt(defaultBufferSize, "defaultBufferSize")
+
+	let abortListener: (() => void) | null = null
+	let buffer: Uint8Array<ArrayBuffer> | null = null
+
+	let cleanupPromise: Promise<void> | null = null
+	function cleanup(
+		type: CreateBYOBReadableStreamHandlerReleaseType,
+		reason?: unknown
+	): Promise<void> {
+
+		if (cleanupPromise === null) {
+			cleanupPromise = (async () => {
+				buffer = null
+				if (options?.signal != null && abortListener != null) {
+					options.signal.removeEventListener("abort", abortListener)
+					abortListener = null
+				}
+				if (handler.release != null) {
+					await handler.release(type, reason)
+				}
+			})()
+		}
+		return cleanupPromise
+	}
+
+	const useByteStream = (options?.__internal_useByteStream__ !== undefined)
+		? options.__internal_useByteStream__
+		: isReadableByteStreamAvailable()
+
+	if (!useByteStream) {
+		return new ReadableStream({
+
+			start(controller) {
+				if (options?.signal != null) {
+					abortListener = () => {
+						const reason = options?.signal?.reason ?? newAbortSignalDefaultError()
+						cleanup("SignalAbort", reason).catch(() => { })
+						controller.error(reason)
+					}
+					options?.signal?.addEventListener("abort", abortListener);
+				}
+			},
+
+			async pull(controller) {
+				try {
+					throwIfAborted(options?.signal)
+					if (buffer === null) {
+						buffer = new Uint8Array(defaultBufferSize)
+					}
+					
+					throwIfAborted(options?.signal)
+					const nread = await handler.read(buffer)
+					throwIfAborted(options?.signal)
+
+					requiresSafeUint(nread, "nread")
+					if (nread === 0) {
+						await cleanup("Close")
+						controller.close()
+						return
+					}
+
+					controller.enqueue(buffer.slice(0, nread))
+				}
+				catch (e) {
+					const isSignalAbort = isThrownByAbortSignal(e, options?.signal)
+					await cleanup(isSignalAbort ? "SignalAbort" : "Error", e).catch(() => { })
+					throw e
+				}
+			},
+
+			async cancel(reason) {
+				await cleanup("Cancel", reason)
+			}
+		})
+	}
+
+	return new ReadableStream({
+		type: "bytes",
+		autoAllocateChunkSize: defaultBufferSize,
+
+		start(controller) {
+			if (options?.signal) {
+				abortListener = () => {
+					const reason = options?.signal?.reason ?? newAbortSignalDefaultError()
+					cleanup("SignalAbort", reason).catch(() => { })
+					controller.error(reason)
+				}
+				options?.signal.addEventListener("abort", abortListener)
+			}
+		},
+
+		async pull(controller) {
+			try {
+				throwIfAborted(options?.signal)
+				const byob = controller.byobRequest
+				if (byob == null) {
+					if (buffer == null) {
+						buffer = new Uint8Array(defaultBufferSize)
+					}
+					
+					throwIfAborted(options?.signal)
+					const nread = await handler.read(buffer)
+					throwIfAborted(options?.signal)
+
+					requiresSafeUint(nread, "nread")
+					if (nread === 0) {
+						await cleanup("Close")
+						controller.close()
+						return
+					}
+
+					controller.enqueue(buffer.slice(0, nread))
+					return
+				}
+
+				const v = byob.view!!
+				const view = new Uint8Array(v.buffer, v.byteOffset, v.byteLength)
+
+				throwIfAborted(options?.signal)
+				const nread = await handler.read(view)
+				throwIfAborted(options?.signal)
+
+				requiresSafeUint(nread, "nread")
+				if (nread === 0) {
+					await cleanup("Close")
+
+					// byobRequest がある場合、respond を呼ばないと promise　が解決されない。
+					// controller.close() の後だと respond(0) を読んでもエラーにはならない。
+					// https://github.com/whatwg/streams/issues/1170
+					controller.close()
+					controller.byobRequest?.respond(0)
+					return
+				}
+
+				byob.respond(nread)
+			}
+			catch (e) {
+				const isSignalAbort = isThrownByAbortSignal(e, options?.signal)
+				await cleanup(isSignalAbort ? "SignalAbort" : "Error", e).catch(() => { })
+				throw e
+			}
+		},
+
+		async cancel(reason) {
+			await cleanup("Cancel", reason)
+		}
+	})
+}
+
+
 export type CreateWritableStreamHandlerReleaseType = "Close" | "Abort" | "SignalAbort" | "Error"
 
 export type CreateWritableStreamHandler = {
@@ -201,6 +437,8 @@ export type CreateWritableStreamHandler = {
 	 * - **Data Chunk**: Receives a `Uint8Array` containing the data. The exact size and memory reference of this chunk depend on the stream's `bufferSize` and `strictBufferSize` options.
 	 * - **Data Safety**: If `options.useBufferView` is `true`, the `chunk` might be a direct view (subarray) of the internal buffer. To prevent data corruption, do not retain references to this view outside this callback.
 	 * - **Handling Errors**: If an error is thrown inside this function, the stream will enter an error state and terminate.
+	 * 
+	 * @param {Uint8Array<ArrayBuffer>} chunk The chunk of byte data to write.
 	 */
 	write: (chunk: Uint8Array<ArrayBuffer>) => PromiseLike<void> | void,
 
@@ -213,6 +451,9 @@ export type CreateWritableStreamHandler = {
 	 * - The stream or its writer is explicitly aborted. (type: `"Abort"`)
 	 * - The provided `AbortSignal` fires an `abort` event. (type: `"SignalAbort"`)
 	 * - An error occurs during a write operation. (type: `"Error"`)
+	 * 
+	 * @param {CreateWritableStreamHandlerReleaseType} type The type of the release operation.
+	 * @param {unknown} reason The reason for the release operation.
 	 */
 	release?: (
 		type: CreateWritableStreamHandlerReleaseType,
@@ -230,7 +471,8 @@ export type CreateWritableStreamOptions = {
 	signal?: AbortSignal,
 
 	/**
-	 * The size of the internal buffer in bytes.
+	 * The size of the internal buffer in bytes.  
+	 * Must be a zero or positive safe integer.  
 	 * 
 	 * Defaults to `0` (unbuffered).
 	 */
@@ -259,20 +501,20 @@ export type CreateWritableStreamOptions = {
 /**
  * Creates a `WritableStream` that writes byte data using the provided custom handler.
  * 
- * This function itself does not throw errors.
  * If you need to throw an error early when the provided `options.signal` is already aborted, 
  * the caller must check and handle it manually.
  * 
- * @param handler - The stream handler: `write`, `release`. See `CreateWritableStreamHandler` for details.
- * @param options - Optional settings: `signal`, `bufferSize`, `strictBufferSize`, `useBufferView`. See `CreateWritableStreamOptions` for details.
- * @returns A `WritableStream<Uint8Array<ArrayBufferLike>>` instance configured with the provided handler and options.
+ * @param {CreateWritableStreamHandler} handler The stream handler: `write`, `release`. See `CreateWritableStreamHandler` for details.
+ * @param {CreateWritableStreamOptions} options Optional settings: `signal`, `bufferSize`, `strictBufferSize`, `useBufferView`. See `CreateWritableStreamOptions` for details.
+ * @returns {WritableStream<Uint8Array<ArrayBufferLike>>} A `WritableStream<Uint8Array<ArrayBufferLike>>` instance configured with the provided handler and options.
  */
 export function createWritableStream(
 	handler: CreateWritableStreamHandler,
 	options?: CreateWritableStreamOptions,
 ): WritableStream<Uint8Array<ArrayBufferLike>> {
 
-	const bufferSize = Math.max(0, Math.ceil(options?.bufferSize ?? 0))
+	const bufferSize = options?.bufferSize ?? 0
+	requiresSafeUint(bufferSize, "bufferSize")
 
 	let abortListener: (() => void) | null = null;
 	let buffer: Uint8Array<ArrayBuffer> | null = null;
@@ -392,7 +634,7 @@ export function createWritableStream(
 
 
 let _isReadableByteStreamAvailable: boolean | null = null
-function isReadableByteStreamAvailable() {
+function isReadableByteStreamAvailable(): boolean {
 	if (_isReadableByteStreamAvailable === null) {
 		try {
 			new ReadableStream({ type: "bytes" })
@@ -402,7 +644,6 @@ function isReadableByteStreamAvailable() {
 			_isReadableByteStreamAvailable = false
 		}
 	}
-
 	return _isReadableByteStreamAvailable
 }
 
@@ -428,4 +669,26 @@ function mapToArrayBuffer(
 	return buffer.buffer instanceof ArrayBuffer
 		? buffer as Uint8Array<ArrayBuffer>
 		: new Uint8Array(buffer)
+}
+
+function requiresSafeUint(num: number, numName?: string): void {
+	const name = numName ?? "value";
+
+	if (!Number.isSafeInteger(num)) {
+		throw new TypeError(`${name} must be a safe integer.`);
+	}
+	if (num < 0) {
+		throw new RangeError(`${name} must be a positive integer.`);
+	}
+}
+
+function requiresNonzeroSafeInt(num: number, numName?: string): void {
+	const name = numName ?? "value";
+
+	if (!Number.isSafeInteger(num)) {
+		throw new TypeError(`${name} must be a safe integer.`);
+	}
+	if (num <= 0) {
+		throw new RangeError(`${name} must be a non-zero positive integer.`);
+	}
 }
