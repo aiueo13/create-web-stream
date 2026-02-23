@@ -65,6 +65,9 @@ export function createReadableStream(
 	options?: CreateReadableStreamOptions,
 ): ReadableStream<Uint8Array<ArrayBuffer>> {
 
+	const read = handler.read
+	const release = handler.release
+
 	let abortListener: (() => void) | null = null
 	let buffer: Uint8Array<ArrayBuffer> | null = null
 
@@ -81,8 +84,8 @@ export function createReadableStream(
 					options.signal.removeEventListener("abort", abortListener)
 					abortListener = null
 				}
-				if (handler.release != null) {
-					await handler.release(type, reason)
+				if (release != null) {
+					await release(type, reason)
 				}
 			})()
 		}
@@ -110,7 +113,7 @@ export function createReadableStream(
 			async pull(controller) {
 				try {
 					throwIfAborted(options?.signal)
-					const data = await handler.read()
+					const data = await read()
 					throwIfAborted(options?.signal)
 					if (data == null || data.byteLength === 0) {
 						await cleanup("Close")
@@ -154,7 +157,7 @@ export function createReadableStream(
 			try {
 				throwIfAborted(options?.signal)
 				if (buffer == null || buffer.byteLength === 0) {
-					buffer = (await handler.read()) ?? null
+					buffer = (await read()) ?? null
 					throwIfAborted(options?.signal)
 				}
 				if (buffer == null || buffer.byteLength === 0) {
@@ -265,7 +268,7 @@ export type CreateBYOBReadableStreamOptions = {
  * If unsupported, only a default reader is available.
  *
  * @param {CreateBYOBReadableStreamHandler} handler The stream handler: `read`, `release`. See `CreateBYOBReadableStreamHandler` for details.
- * @param {number} defaultBufferSize The default size of the buffer passed to `handler.read`. Must be a positive safe integer. Used as `autoAllocateChunkSize` when a bytes-type reader is available. If unsupported, used as the size of the internal buffer for a default reader.
+ * @param {number} defaultBufferSize The size of the fallback buffer passed to `handler.read`. Must be a positive safe integer. Used as `autoAllocateChunkSize` when a bytes-type reader is available. If unsupported, used as the size of the internal buffer for a default reader.
  * @param {CreateBYOBReadableStreamOptions} options Optional settings: `signal`. See `CreateBYOBReadableStreamOptions` for details.
  * @returns {ReadableStream<Uint8Array<ArrayBuffer>>} A `ReadableStream<Uint8Array<ArrayBuffer>>` configured with the provided handler and options.
  */
@@ -275,8 +278,9 @@ export function createBYOBReadableStream(
 	options?: CreateBYOBReadableStreamOptions,
 ): ReadableStream<Uint8Array<ArrayBuffer>> {
 
-	defaultBufferSize = Math.ceil(defaultBufferSize)
 	requiresNonzeroSafeInt(defaultBufferSize, "defaultBufferSize")
+	const read = handler.read
+	const release = handler.release
 
 	let abortListener: (() => void) | null = null
 	let buffer: Uint8Array<ArrayBuffer> | null = null
@@ -294,8 +298,8 @@ export function createBYOBReadableStream(
 					options.signal.removeEventListener("abort", abortListener)
 					abortListener = null
 				}
-				if (handler.release != null) {
-					await handler.release(type, reason)
+				if (release != null) {
+					await release(type, reason)
 				}
 			})()
 		}
@@ -328,7 +332,7 @@ export function createBYOBReadableStream(
 					}
 					
 					throwIfAborted(options?.signal)
-					const nread = await handler.read(buffer)
+					const nread = await read(buffer)
 					throwIfAborted(options?.signal)
 
 					requiresSafeUint(nread, "nread")
@@ -378,7 +382,7 @@ export function createBYOBReadableStream(
 					}
 					
 					throwIfAborted(options?.signal)
-					const nread = await handler.read(buffer)
+					const nread = await read(buffer)
 					throwIfAborted(options?.signal)
 
 					requiresSafeUint(nread, "nread")
@@ -392,11 +396,12 @@ export function createBYOBReadableStream(
 					return
 				}
 
-				const v = byob.view!!
+				const v = byob.view
+				if (v == null) return
 				const view = new Uint8Array(v.buffer, v.byteOffset, v.byteLength)
 
 				throwIfAborted(options?.signal)
-				const nread = await handler.read(view)
+				const nread = await read(view)
 				throwIfAborted(options?.signal)
 
 				requiresSafeUint(nread, "nread")
@@ -513,6 +518,8 @@ export function createWritableStream(
 	options?: CreateWritableStreamOptions,
 ): WritableStream<Uint8Array<ArrayBufferLike>> {
 
+	const write = handler.write
+	const release = handler.release
 	const bufferSize = options?.bufferSize ?? 0
 	requiresSafeUint(bufferSize, "bufferSize")
 
@@ -533,8 +540,8 @@ export function createWritableStream(
 					options?.signal?.removeEventListener("abort", abortListener)
 					abortListener = null
 				}
-				if (handler.release != null) {
-					await handler.release(type, reason)
+				if (release != null) {
+					await release(type, reason)
 				}
 			})()
 		}
@@ -571,12 +578,12 @@ export function createWritableStream(
 							: buffer.slice(0, bufferOffset)
 
 						throwIfAborted(options?.signal)
-						await handler.write(chunk)
+						await write(chunk)
 						bufferOffset = 0
 					}
 
 					throwIfAborted(options?.signal)
-					await handler.write(mapToArrayBuffer(src))
+					await write(mapToArrayBuffer(src))
 					return
 				}
 
@@ -599,7 +606,7 @@ export function createWritableStream(
 						if (options?.useBufferView !== true) {
 							buffer = null
 						}
-						await handler.write(chunk)
+						await write(chunk)
 						bufferOffset = 0
 					}
 				}
@@ -616,7 +623,7 @@ export function createWritableStream(
 				if (0 < bufferOffset && buffer != null) {
 					const view = buffer.subarray(0, bufferOffset)
 					buffer = null
-					await handler.write(view)
+					await write(view)
 				}
 				await cleanup("Close")
 			}
