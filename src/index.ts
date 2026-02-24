@@ -11,7 +11,7 @@ export type CreateReadableStreamHandler = {
 	 * - **Ending the stream**: Return `null`, `undefined`, or an empty `Uint8Array` (`byteLength === 0`) to signal that no more data is available. This will automatically close the stream.
 	 * - **Handling errors**: If an error is thrown inside this function, the stream will enter an error state and terminate.
 	 * 
-	 * @returns {PromiseLike<CreateReadableStreamHandlerSource> | CreateReadableStreamHandlerSource} The next chunk of bytes.
+	 * @returns The next chunk of bytes.
 	 */
 	read: () => PromiseLike<CreateReadableStreamHandlerSource> | CreateReadableStreamHandlerSource,
 
@@ -25,8 +25,10 @@ export type CreateReadableStreamHandler = {
 	 * - The provided `AbortSignal` fires an `abort` event. (type: `"SignalAbort"`)
 	 * - An error occurs during a read operation. (type: `"Error"`)
 	 * 
-	 * @param {CreateReadableStreamHandlerReleaseType} type The type of the release operation.
-	 * @param {unknown} reason The reason for the release operation.
+	 * Note that it will not be invoked if `createReadableStream` function itself throws an error.
+	 * 
+	 * @param type - The type of the release operation.
+	 * @param reason - The reason for the release operation.
 	 */
 	release?: (type: CreateReadableStreamHandlerReleaseType, reason?: unknown) => PromiseLike<void> | void,
 }
@@ -41,6 +43,15 @@ export type CreateReadableStreamOptions = {
 	signal?: AbortSignal,
 
 	/**
+	 * If `true`, checks the `signal` immediately upon stream creation.
+	 * If the signal is already aborted, it throws an error early.
+	 * If `false`, an error will be thrown during the first read operation of the stream.
+	 * 
+	 * Defaults to `true`.
+	 */
+	checkSignalEarly?: boolean,
+
+	/**
 	 * @internal
 	 * @ignore
 	 */
@@ -50,20 +61,22 @@ export type CreateReadableStreamOptions = {
 /**
  * Creates a `ReadableStream` that yields byte data using the provided custom handler.
  * 
- * If you need to throw an error early when the provided `options.signal` is already aborted,
- * the caller must check and handle it manually.
- * 
  * The resulting stream can provide a BYOB reader if supported by the runtime.
  * If unsupported, only a default reader is available.
  * 
- * @param {CreateReadableStreamHandler} handler The stream handler: `read`, `release`. See `CreateReadableStreamHandler` for details.
- * @param {CreateReadableStreamOptions} options Optional settings: `signal`. See `CreateReadableStreamOptions` for details.
- * @returns {ReadableStream<Uint8Array<ArrayBuffer>>} A `ReadableStream<Uint8Array<ArrayBuffer>>` configured with the provided handler and options.
+ * @param handler - The stream handler: `read`, `release`. See `CreateReadableStreamHandler` for details.
+ * @param options - Optional settings: `signal`, `checkSignalEarly`. See `CreateReadableStreamOptions` for details.
+ * @returns A `ReadableStream<Uint8Array<ArrayBuffer>>` configured with the provided handler and options.
  */
 export function createReadableStream(
 	handler: CreateReadableStreamHandler,
 	options?: CreateReadableStreamOptions,
 ): ReadableStream<Uint8Array<ArrayBuffer>> {
+
+	const checkSignalEarly = options?.checkSignalEarly ?? true
+	if (checkSignalEarly) {
+		throwIfAborted(options?.signal)
+	}
 
 	const read = handler.read
 	const release = handler.release
@@ -221,8 +234,8 @@ export type CreateBYOBReadableStreamHandler = {
 	 * - **Ending the stream**: Return `0` to signal that no more data is available. This will automatically close the stream.
 	 * - **Handling errors**: If an error is thrown inside this function, the stream will enter an error state and terminate.
 	 * 
-	 * @param {Uint8Array<ArrayBuffer>} buffer The buffer to write the data into.
-	 * @returns {PromiseLike<number> | number} The number of bytes written.
+	 * @param buffer - The buffer to write the data into.
+	 * @returns The number of bytes written.
 	 */
 	read: (buffer: Uint8Array<ArrayBuffer>) => PromiseLike<number> | number
 
@@ -236,8 +249,10 @@ export type CreateBYOBReadableStreamHandler = {
 	 * - The provided `AbortSignal` fires an `abort` event. (type: `"SignalAbort"`)
 	 * - An error occurs during a read operation. (type: `"Error"`)
 	 * 
-	 * @param {CreateBYOBReadableStreamHandlerReleaseType} type The type of the release operation.
-	 * @param {unknown} reason The reason for the release operation.
+	 * Note that it will not be invoked if `createBYOBReadableStream` function itself throws an error.
+	 * 
+	 * @param type - The type of the release operation.
+	 * @param reason - The reason for the release operation.
 	 */
 	release?: (type: CreateBYOBReadableStreamHandlerReleaseType, reason?: unknown) => PromiseLike<void> | void,
 }
@@ -252,6 +267,15 @@ export type CreateBYOBReadableStreamOptions = {
 	signal?: AbortSignal,
 
 	/**
+	 * If `true`, checks the `signal` immediately upon stream creation.
+	 * If the signal is already aborted, it throws an error early.
+	 * If `false`, an error will be thrown during the first read operation of the stream.
+	 * 
+	 * Defaults to `true`.
+	 */
+	checkSignalEarly?: boolean,
+
+	/**
 	 * @internal
 	 * @ignore
 	 */
@@ -261,22 +285,24 @@ export type CreateBYOBReadableStreamOptions = {
 /**
  * Creates a `ReadableStream` that yields byte data using a BYOB-style handler.
  *
- * If you need to throw an error early when the provided `options.signal` is already aborted,
- * the caller must check and handle it manually.
- * 
  * The resulting stream can provide a BYOB reader if supported by the runtime.
  * If unsupported, only a default reader is available.
  *
- * @param {CreateBYOBReadableStreamHandler} handler The stream handler: `read`, `release`. See `CreateBYOBReadableStreamHandler` for details.
- * @param {number} defaultBufferSize The size of the fallback buffer passed to `handler.read`. Must be a positive safe integer. Used as `autoAllocateChunkSize` when a bytes-type reader is available. If unsupported, used as the size of the internal buffer for a default reader.
- * @param {CreateBYOBReadableStreamOptions} options Optional settings: `signal`. See `CreateBYOBReadableStreamOptions` for details.
- * @returns {ReadableStream<Uint8Array<ArrayBuffer>>} A `ReadableStream<Uint8Array<ArrayBuffer>>` configured with the provided handler and options.
+ * @param handler - The stream handler: `read`, `release`. See `CreateBYOBReadableStreamHandler` for details.
+ * @param defaultBufferSize - The size of the fallback buffer passed to `handler.read`. Must be a positive safe integer. Used as `autoAllocateChunkSize` when a bytes-type reader is available. If unsupported, used as the size of the internal buffer for a default reader.
+ * @param options - Optional settings: `signal`, `checkSignalEarly`. See `CreateBYOBReadableStreamOptions` for details.
+ * @returns A `ReadableStream<Uint8Array<ArrayBuffer>>` configured with the provided handler and options.
  */
 export function createBYOBReadableStream(
 	handler: CreateBYOBReadableStreamHandler,
 	defaultBufferSize: number,
 	options?: CreateBYOBReadableStreamOptions,
 ): ReadableStream<Uint8Array<ArrayBuffer>> {
+
+	const checkSignalEarly = options?.checkSignalEarly ?? true
+	if (checkSignalEarly) {
+		throwIfAborted(options?.signal)
+	}
 
 	requiresNonzeroSafeInt(defaultBufferSize, "defaultBufferSize")
 	const read = handler.read
@@ -330,7 +356,7 @@ export function createBYOBReadableStream(
 					if (buffer === null) {
 						buffer = new Uint8Array(defaultBufferSize)
 					}
-					
+
 					throwIfAborted(options?.signal)
 					const nread = await read(buffer)
 					throwIfAborted(options?.signal)
@@ -380,7 +406,7 @@ export function createBYOBReadableStream(
 					if (buffer == null) {
 						buffer = new Uint8Array(defaultBufferSize)
 					}
-					
+
 					throwIfAborted(options?.signal)
 					const nread = await read(buffer)
 					throwIfAborted(options?.signal)
@@ -443,7 +469,7 @@ export type CreateWritableStreamHandler = {
 	 * - **Data Safety**: If `options.useBufferView` is `true`, the `chunk` might be a direct view (subarray) of the internal buffer. To prevent data corruption, do not retain references to this view outside this callback.
 	 * - **Handling Errors**: If an error is thrown inside this function, the stream will enter an error state and terminate.
 	 * 
-	 * @param {Uint8Array<ArrayBuffer>} chunk The chunk of byte data to write.
+	 * @param chunk - The chunk of byte data to write.
 	 */
 	write: (chunk: Uint8Array<ArrayBuffer>) => PromiseLike<void> | void,
 
@@ -457,8 +483,10 @@ export type CreateWritableStreamHandler = {
 	 * - The provided `AbortSignal` fires an `abort` event. (type: `"SignalAbort"`)
 	 * - An error occurs during a write operation. (type: `"Error"`)
 	 * 
-	 * @param {CreateWritableStreamHandlerReleaseType} type The type of the release operation.
-	 * @param {unknown} reason The reason for the release operation.
+	 * Note that it will not be invoked if `createWritableStream` function itself throws an error.
+	 * 
+	 * @param type - The type of the release operation.
+	 * @param reason - The reason for the release operation.
 	 */
 	release?: (
 		type: CreateWritableStreamHandlerReleaseType,
@@ -474,6 +502,15 @@ export type CreateWritableStreamOptions = {
 	 * When the abort event is fired, the handler's `release` function will be called.
 	 */
 	signal?: AbortSignal,
+
+	/**
+	 * If `true`, checks the `signal` immediately upon stream creation.
+	 * If the signal is already aborted, it throws an error early.
+	 * If `false`, an error will be thrown during the first write operation of the stream.
+	 * 
+	 * Defaults to `true`.
+	 */
+	checkSignalEarly?: boolean,
 
 	/**
 	 * The size of the internal buffer in bytes.  
@@ -506,17 +543,19 @@ export type CreateWritableStreamOptions = {
 /**
  * Creates a `WritableStream` that writes byte data using the provided custom handler.
  * 
- * If you need to throw an error early when the provided `options.signal` is already aborted, 
- * the caller must check and handle it manually.
- * 
- * @param {CreateWritableStreamHandler} handler The stream handler: `write`, `release`. See `CreateWritableStreamHandler` for details.
- * @param {CreateWritableStreamOptions} options Optional settings: `signal`, `bufferSize`, `strictBufferSize`, `useBufferView`. See `CreateWritableStreamOptions` for details.
- * @returns {WritableStream<Uint8Array<ArrayBufferLike>>} A `WritableStream<Uint8Array<ArrayBufferLike>>` instance configured with the provided handler and options.
+ * @param handler - The stream handler: `write`, `release`. See `CreateWritableStreamHandler` for details.
+ * @param options - Optional settings: `signal`, `checkSignalEarly`, `bufferSize`, `strictBufferSize`, `useBufferView`. See `CreateWritableStreamOptions` for details.
+ * @returns A `WritableStream<Uint8Array<ArrayBufferLike>>` instance configured with the provided handler and options.
  */
 export function createWritableStream(
 	handler: CreateWritableStreamHandler,
 	options?: CreateWritableStreamOptions,
 ): WritableStream<Uint8Array<ArrayBufferLike>> {
+
+	const checkSignalEarly = options?.checkSignalEarly ?? true
+	if (checkSignalEarly) {
+		throwIfAborted(options?.signal)
+	}
 
 	const write = handler.write
 	const release = handler.release

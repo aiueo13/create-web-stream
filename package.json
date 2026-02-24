@@ -1,6 +1,6 @@
 {
   "name": "create-web-stream",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "author": "OkaYu",
   "license": "(MIT OR Apache-2.0)",
   "description": "Create Web Readable/Writable streams from simple handlers and options.",

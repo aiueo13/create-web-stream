@@ -232,17 +232,6 @@ test('async release awaited', async () => {
   assert.equal(releaseDone, true)
 })
 
-test('signal already aborted at creation', async () => {
-  const ac = new AbortController()
-  ac.abort()
-  const stream = createWritableStream(
-    { write() {} },
-    { signal: ac.signal },
-  )
-  const writer = stream.getWriter()
-  await assert.rejects(() => writer.write(new Uint8Array([1])), { name: 'AbortError' })
-})
-
 test('strictBufferSize splits single write larger than bufferSize', async () => {
   const chunks = []
   const stream = createWritableStream(
